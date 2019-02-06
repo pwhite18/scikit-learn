@@ -14,6 +14,7 @@ from functools import partial
 import warnings
 
 import numpy as np
+import random
 from scipy.spatial import distance
 from scipy.sparse import csr_matrix
 from scipy.sparse import issparse
@@ -264,6 +265,144 @@ def _argmin_min_reduce(dist, start):
     values = dist[np.arange(dist.shape[0]), indices]
     return indices, values
 
+#TODO need to handle unassigned points in terms of labels
+def _cop_argmin_min_reduce(dist, start, constraints):
+    constraints=np.asarray(constraints)
+    #constraints should be in the form
+    # constraints['dl'] = [[0,1],[0,3]]
+    #Assign points here based on constraints
+    seed = random.randint(0,1000000)
+    dist, constraints = _shuffle(seed,dist,constraints)
+    print(constraints)
+    labels=[]
+    notlabeled=[]
+    clusters={}
+    for c in range(dist.shape[1]):
+        clusters[c] = []
+    indices=np.argsort(dist)
+    for point in range(dist.shape[0]):
+        def assign_point():
+            for cluster_idx in indices[point]:
+                if not clusters[cluster_idx]: # if cluster is empty, constraints do not matter
+                    print('constraint not violated')
+                    clusters[cluster_idx].append(int(point))
+                    labels.append(int(cluster_idx))
+                    return True
+                else:
+                    if not _violate_constraints(point, clusters[cluster_idx], constraints): # checks if assignment will violate constraint
+                        print('constraint not violated')
+                        clusters[cluster_idx].append(int(point))
+                        labels.append(int(cluster_idx))
+                        return True
+            return False
+        assigned = assign_point()
+        if not assigned:
+            truePoint = _restorePoint(seed,point,dist.shape[0])
+            notlabeled.append(truePoint)
+            def forceAssign():
+                #method to assign point to nearest cluster although a constraint is broken
+                clusters[indices[point][0]].append(int(point))
+                labels.append(int(indices[point][0]))
+
+
+            #need way to handle points that were not assigned, when labels are returned
+            print(str(truePoint) +' point not assigned')
+            forceAssign()
+
+            #assign a space as a placeholder for cluster
+            #labels += ' '
+    labels=_restoreList(seed,labels)
+    assigned_distances = [(idx,val) for idx,val in enumerate(labels) if type(val) == int]
+    dist_idx = [x[0] for x in assigned_distances] # indexes of assigned points 
+    dist_val = [x[1] for x in assigned_distances] # cluster number of assigned point
+    
+    labelsofassigned = [n for n in labels if type(n) ==int]
+    
+    
+    values = []
+    for i,idx in enumerate(dist_idx):
+        values.append(dist[idx][dist_val[i]])
+    print('labels',labelsofassigned,'vals',values)
+
+    return labelsofassigned, values
+
+def _shuffle(seed, inarray, constraints):
+    random.seed(seed)
+    order=list(range(inarray.shape[0]))
+    random.shuffle(order)
+    
+    inarray = inarray[order] # shuffle the points to some random order based on seed
+
+    orig_constraints = np.copy(constraints)
+
+    #used to reorder the constraints properly
+    shuffle_places = [order.index(i) for i in range(inarray.shape[0])] # get index of newly shuffled items
+    mapping = {}
+    for i in range(inarray.shape[0]):
+        mapping[i] = shuffle_places[i]
+
+    for old, new in mapping.items(): # list of changes to order of point indices 
+        constraints[orig_constraints==old]=new
+
+    return inarray, constraints
+
+def _unshuffle(seed, shufarray, shufconstraints):
+    originalList=[0]*(shufarray.shape[0])
+    order = list(range(shufarray.shape[0]))
+    random.seed(seed)
+    random.shuffle(order)
+    reorder=[order.index(k) for k in range(shufarray.shape[0])]
+    originalArray=shufarray[reorder]
+
+    shuffle_places = [order.index(i) for i in range(shufarray.shape[0])] # get index of newly shuffled items
+    mapping = {}
+
+    for i in range(shufarray.shape[0]):
+        mapping[i] = shuffle_places[i]
+    oldcon = np.copy(shufconstraints)
+    for old, new in mapping.items():
+        shufconstraints[oldcon==new]=old
+
+    return originalArray, originalConstraints
+
+def _restoreList(seed,labels):
+    random.seed(seed)
+    order = list(range(len(labels)))
+    random.shuffle(order)
+    reorder = [order.index(k) for k in range(len(labels))]
+    labels = [labels[val] for val in reorder]
+    return labels
+
+def _restorePoint(seed, point, num_points):
+    random.seed(seed)
+    order = list(range(num_points))
+    return order[point]
+
+
+
+    
+
+def _violate_constraints(point, clusterPoints, constraints):
+    #TODO add in ml constraint handling 
+    # point is integer value which is attempting to be assigned
+    # clusterPoints is list of points in cluster
+    # constraints is dictionary of ml and dl constraints
+    constraints = constraints.tolist()
+
+    def dontLinkViolated():
+        if not constraints: # if no constraints are specified, exit constraint check 
+            return False
+        if (len(constraints) > 0):
+            for dlpair in constraints:
+                if point in dlpair:
+                    dlpoint = dlpair[1-dlpair.index(point)] # get the point in the dl pair that should not be clustered with
+                    if dlpoint in clusterPoints:
+                        print('Cl constraint violated')
+                        return True
+            return False
+    return(dontLinkViolated())
+
+
 
 def pairwise_distances_argmin_min(X, Y, axis=1, metric="euclidean",
                                   batch_size=None, metric_kwargs=None):
@@ -360,6 +499,103 @@ def pairwise_distances_argmin_min(X, Y, axis=1, metric="euclidean",
 
     return indices, values
 
+def cop_pairwise_distances_argmin_min(X, Y,constraints=[], axis=1, metric="euclidean",
+                                  batch_size=None, metric_kwargs=None):
+    """Compute minimum distances between one point and a set of points.
+
+    This function computes for each row in X, the index of the row of Y which
+    is closest (according to the specified distance). The minimal distances are
+    also returned.
+
+    This is mostly equivalent to calling:
+
+        (pairwise_distances(X, Y=Y, metric=metric).argmin(axis=axis),
+         pairwise_distances(X, Y=Y, metric=metric).min(axis=axis))
+
+    but uses much less memory, and is faster for large arrays.
+
+    Parameters
+    ----------
+    X : {array-like, sparse matrix}, shape (n_samples1, n_features)
+        Array containing points.
+
+    Y : {array-like, sparse matrix}, shape (n_samples2, n_features)
+        Arrays containing points.
+
+    axis : int, optional, default 1
+        Axis along which the argmin and distances are to be computed.
+
+    metric : string or callable, default 'euclidean'
+        metric to use for distance computation. Any metric from scikit-learn
+        or scipy.spatial.distance can be used.
+
+        If metric is a callable function, it is called on each
+        pair of instances (rows) and the resulting value recorded. The callable
+        should take two arrays as input and return one value indicating the
+        distance between them. This works for Scipy's metrics, but is less
+        efficient than passing the metric name as a string.
+
+        Distance matrices are not supported.
+
+        Valid values for metric are:
+
+        - from scikit-learn: ['cityblock', 'cosine', 'euclidean', 'l1', 'l2',
+          'manhattan']
+
+        - from scipy.spatial.distance: ['braycurtis', 'canberra', 'chebyshev',
+          'correlation', 'dice', 'hamming', 'jaccard', 'kulsinski',
+          'mahalanobis', 'minkowski', 'rogerstanimoto', 'russellrao',
+          'seuclidean', 'sokalmichener', 'sokalsneath', 'sqeuclidean',
+          'yule']
+
+        See the documentation for scipy.spatial.distance for details on these
+        metrics.
+
+    batch_size : integer
+        .. deprecated:: 0.20
+            Deprecated for removal in 0.22.
+            Use sklearn.set_config(working_memory=...) instead.
+
+    metric_kwargs : dict, optional
+        Keyword arguments to pass to specified metric function.
+
+    Returns
+    -------
+    argmin : numpy.ndarray
+        Y[argmin[i], :] is the row in Y that is closest to X[i, :].
+
+    distances : numpy.ndarray
+        distances[i] is the distance between the i-th row in X and the
+        argmin[i]-th row in Y.
+
+    See also
+    --------
+    sklearn.metrics.pairwise_distances
+    sklearn.metrics.pairwise_distances_argmin
+    """
+    if batch_size is not None:
+        warnings.warn("'batch_size' is ignored. It was deprecated in version "
+                      "0.20 and will be removed in version 0.22. "
+                      "Use sklearn.set_config(working_memory=...) instead.",
+                      DeprecationWarning)
+    X, Y = check_pairwise_arrays(X, Y)
+
+    if metric_kwargs is None:
+        metric_kwargs = {}
+
+    if axis == 0:
+        X, Y = Y, X
+
+    
+    #TODO THIS LINE IS WHERE LABELS ARE ASSIGNED. 
+    #     NEED TO MODIFY TO ALLOW CONSTRAINTS AS WELL AS PASS CONSTRAINTS INTO IT
+    indices, values = zip(*cop_pairwise_distances_chunked(
+        X, Y, reduce_func=_cop_argmin_min_reduce, metric=metric,constraints=constraints,
+        **metric_kwargs))
+    indices = np.concatenate(indices)
+    values = np.concatenate(values)
+
+    return indices, values
 
 def pairwise_distances_argmin(X, Y, axis=1, metric="euclidean",
                               batch_size=None, metric_kwargs=None):
@@ -1305,6 +1541,72 @@ def pairwise_distances_chunked(X, Y=None, reduce_func=None,
             _check_chunk_size(D_chunk, chunk_size)
         yield D_chunk
 
+def cop_pairwise_distances_chunked(X, Y=None, reduce_func=None,
+                               metric='euclidean', n_jobs=None,
+                               working_memory=None,constraints=None, **kwds):
+    """Generate a distance matrix chunk by chunk with optional reduction
+
+    In cases where not all of a pairwise distance matrix needs to be stored at
+    once, this is used to calculate pairwise distances in
+    ``working_memory``-sized chunks.  If ``reduce_func`` is given, it is run
+    on each chunk and its return values are concatenated into lists, arrays
+    or sparse matrices.
+
+
+    Yields
+    ------
+    D_chunk : array or sparse matrix
+        A contiguous slice of distance matrix, optionally processed by
+        ``reduce_func``.
+
+    """
+    #Y=None
+    n_samples_X = _num_samples(X)
+    if metric == 'precomputed':
+        slices = (slice(0, n_samples_X),)
+    else:
+        if Y is None:
+            Y = X
+        # We get as many rows as possible within our working_memory budget to
+        # store len(Y) distances in each row of output.
+        #
+        # Note:
+        #  - this will get at least 1 row, even if 1 row of distances will
+        #    exceed working_memory.
+        #  - this does not account for any temporary memory usage while
+        #    calculating distances (e.g. difference of vectors in manhattan
+        #    distance.
+        
+        chunk_n_rows = get_chunk_n_rows(row_bytes=8 * _num_samples(Y),
+                                        max_n_rows=n_samples_X,
+                                        working_memory=working_memory)
+        slices = gen_batches(n_samples_X, chunk_n_rows)
+        
+    # precompute data-derived metric params
+    params = _precompute_metric_params(X, Y, metric=metric, **kwds)
+    kwds.update(**params)
+
+    for sl in slices:
+        if sl.start == 0 and sl.stop == n_samples_X:
+            X_chunk = X  # enable optimised paths for X is Y
+        else:
+            X_chunk = X[sl]
+        D_chunk = pairwise_distances(X_chunk, Y, metric=metric,
+                                    n_jobs=n_jobs, **kwds)
+        if ((X is Y or Y is None)
+                and PAIRWISE_DISTANCE_FUNCTIONS.get(metric, None)
+                is euclidean_distances):
+            # zeroing diagonal, taking care of aliases of "euclidean",
+            # i.e. "l2"
+            D_chunk.flat[sl.start::_num_samples(X) + 1] = 0
+        
+        #the reduce func called here is what actually does the labeling and min distance calculations
+        if reduce_func is not None:
+            chunk_size = D_chunk.shape[0]
+            D_chunk = reduce_func(D_chunk, sl.start,constraints)
+            #_check_chunk_size(D_chunk, chunk_size)
+
+        yield D_chunk
 
 def pairwise_distances(X, Y=None, metric="euclidean", n_jobs=None, **kwds):
     """ Compute the distance matrix from a vector array X and optional Y.
