@@ -185,6 +185,7 @@ def k_means(X, n_clusters, sample_weight=None, init='k-means++',
             precompute_distances='auto', n_init=10, max_iter=300,
             verbose=False, tol=1e-4, random_state=None, copy_x=True,
             n_jobs=None, algorithm="cop", return_n_iter=False, constraints=None):
+
     """K-means clustering algorithm.
 
     Read more in the :ref:`User Guide <k_means>`.
@@ -378,6 +379,9 @@ def k_means(X, n_clusters, sample_weight=None, init='k-means++',
                 verbose=verbose, precompute_distances=precompute_distances,
                 tol=tol, x_squared_norms=x_squared_norms,
                 random_state=random_state)
+
+            #TODO create a dictionary of results containing inertia as well as assigned point numbers
+            #     instead of keeping strictly the best values 
             # determine if these results are the best so far
             if best_inertia is None or inertia < best_inertia:
                 best_labels = labels.copy()
@@ -416,7 +420,7 @@ def k_means(X, n_clusters, sample_weight=None, init='k-means++',
                       "in X.".format(distinct_clusters, n_clusters),
                       ConvergenceWarning, stacklevel=2)
 
-    print(best_inertia)
+    print('best inertia',best_inertia)
     if return_n_iter:
         return best_centers, best_labels, best_inertia, best_n_iter
     else:
@@ -452,7 +456,7 @@ def _kmeans_single_elkan(X, sample_weight, n_clusters, constraints, max_iter=300
     return labels, inertia, centers, n_iter
 
 
-def _kmeans_single_lloyd(X, sample_weight, n_clusters, max_iter=300,
+def _kmeans_single_lloyd(X, sample_weight, n_clusters,constraints, max_iter=300,
                          init='k-means++', verbose=False, x_squared_norms=None,
                          random_state=None, tol=1e-4,
                          precompute_distances=True):
@@ -541,11 +545,13 @@ def _kmeans_single_lloyd(X, sample_weight, n_clusters, max_iter=300,
     for i in range(max_iter):
         centers_old = centers.copy()
         # labels assignment is also called the E-step of EM
+        print(distances)
         labels, inertia = \
             _labels_inertia(X, sample_weight, x_squared_norms, centers,
                             precompute_distances=precompute_distances,
                             distances=distances)
 
+        print(distances)
         # computation of the means is also called the M-step of EM
         if sp.issparse(X):
             centers = _k_means._centers_sparse(X, sample_weight, labels,
@@ -585,6 +591,11 @@ def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
                          init='k-means++', verbose=False , x_squared_norms=None,
                          random_state=None, tol=1e-4,
                          precompute_distances=True):
+
+    #TODO normalize inertia calculations across algorithms for fair comparison of variance of points
+    #TODO keep n best runs in terms of inertia as well as points assigned.
+    #TODO more rigorus testing, like the case when no points get assinged.
+
     random_state = check_random_state(random_state)
 
     sample_weight = _check_sample_weight(X, sample_weight)
@@ -600,14 +611,43 @@ def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
     # closer center for reallocation in case of ties
     distances = np.zeros(shape=(X.shape[0],), dtype=X.dtype)
 
+    Xo = np.copy(X)
+    So = np.copy(sample_weight)
+
     # iterations
     for i in range(max_iter):
+        X = Xo
+        sample_weight = So
         centers_old = centers.copy()
         # labels assignment is also called the E-step of EM
+        #NOTE This method call re-assigns in-place 'distances' within 
+        #     the only place distancs seems to be used following this is in the
+        #     issparse method 
+        #NOTE This method calculates inertia with only the assigned labels.
+        #     This call also returns labels in the form [' ', 2, 1, 0]
+        print('distbug3', distances)
         labels, inertia = \
             _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,
                             precompute_distances=precompute_distances,
                             distances=distances)
+        # Get unassigned points
+        unassigned = [idx for idx,val in enumerate(labels) if type(val) is not int]
+
+        print('unassigned',unassigned)
+        #TODO Need to modify X, sample weight, labels, and distances in order to account for the unassigned points here.
+        print('Before modification, X is {}, sample_weight is {}, labels are {}, distances is {}'.format(X,sample_weight,labels,distances))
+
+        if unassigned:
+            for k in sorted(unassigned, reverse=True): # Have to remove elemetns without the use of numpy since it cannot handle mixed types
+                del labels[k]
+            X=np.delete(X,(unassigned),axis=0)
+            sample_weight = np.delete(sample_weight, (unassigned))
+            distances = np.delete(distances, (unassigned))
+
+        labels = np.asarray(labels)
+        print('After modification, X is {}, sample_weight is {}, labels are {}, distances is {}'.format(X,sample_weight,labels,distances))
+        # cython k-means code assumes int32 inputs
+        labels = labels.astype(np.int32)
 
         # computation of the means is also called the M-step of EM
         if sp.issparse(X):
@@ -632,15 +672,14 @@ def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
                       "center shift %e within tolerance %e"
                       % (i, center_shift_total, tol))
             break
-
+    # Not sure of the usefulness of this method. it could cause adverse effects
     if center_shift_total > 0:
         # rerun E-step in case of non-convergence so that predicted labels
         # match cluster centers
         best_labels, best_inertia = \
-            _labels_inertia(X, sample_weight, x_squared_norms, best_centers,
+            _cop_labels_inertia(X, sample_weight, x_squared_norms, best_centers,
                             precompute_distances=precompute_distances,
                             distances=distances)
-        print('best labels line 553', best_labels)
 
     return best_labels, best_inertia, best_centers, i + 1
 
@@ -689,7 +728,7 @@ def _labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
     if n_samples == distances.shape[0]:
         # distances will be changed in-place
         distances[:] = mindist
-    inertia = (mindist * sample_weight).sum()
+    inertia = np.mean(mindist * sample_weight)
     return labels, inertia
 
 def _cop_labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
@@ -721,15 +760,15 @@ def _cop_labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
     # memory blowup in the case of a large number of samples and clusters.
     # TODO: Once PR #7383 is merged use check_inputs=False in metric_kwargs.
 
+    #NOTE This cop method now returns lists of mixed types due to the possibility
+    #     of points that do not get assigned. Mixed ints and strings of ' ' 
     labels, mindist = cop_pairwise_distances_argmin_min(
         X=X, Y=centers, constraints=constraints, metric='euclidean', metric_kwargs={'squared': True})
-    # cython k-means code assumes int32 inputs
-    labels = labels.astype(np.int32)
-    if n_samples == distances.shape[0]:
-        # distances will be changed in-place
-        distances[:] = mindist
-    inertia = (mindist * sample_weight).sum()
-    print('labels',labels,'inertia',inertia)
+
+    distances = mindist
+    onlylabeled = np.asarray([val for val in mindist if type(val)==np.float64])
+    #NOTE Sample weights were removed from this calculation 
+    inertia = np.mean(onlylabeled)
     return labels, inertia
 
 def _labels_inertia(X, sample_weight, x_squared_norms, centers,
@@ -789,7 +828,6 @@ def _labels_inertia(X, sample_weight, x_squared_norms, centers,
         inertia = _k_means._assign_labels_array(
             X, sample_weight, x_squared_norms, centers, labels,
             distances=distances)
-    print('labels',labels,'inertia',inertia)
     return labels, inertia
 
 def _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,
@@ -827,7 +865,6 @@ def _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,
     labels = np.full(n_samples, -1, np.int32)
     if distances is None:
         distances = np.zeros(shape=(0,), dtype=X.dtype)
-    # distances will be changed in-place
     return _cop_labels_inertia_precompute_dense(X, sample_weight,
                                                     x_squared_norms, centers,
                                                     distances, constraints)
@@ -887,10 +924,10 @@ def _init_centroids(X, k, init, random_state=None, x_squared_norms=None,
         raise ValueError(
             "n_samples=%d should be larger than k=%d" % (n_samples, k))
 
-    if isinstance(init, string_types) and init == 'k-means++':
+    if isinstance(init, str) and init == 'k-means++':
         centers = _k_init(X, k, random_state=random_state,
                           x_squared_norms=x_squared_norms)
-    elif isinstance(init, string_types) and init == 'random':
+    elif isinstance(init, str) and init == 'random':
         seeds = random_state.permutation(n_samples)[:k]
         centers = X[seeds]
     elif hasattr(init, '__array__'):

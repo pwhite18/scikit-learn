@@ -273,7 +273,6 @@ def _cop_argmin_min_reduce(dist, start, constraints):
     #Assign points here based on constraints
     seed = random.randint(0,1000000)
     dist, constraints = _shuffle(seed,dist,constraints)
-    print(constraints)
     labels=[]
     notlabeled=[]
     clusters={}
@@ -301,30 +300,50 @@ def _cop_argmin_min_reduce(dist, start, constraints):
             notlabeled.append(truePoint)
             def forceAssign():
                 #method to assign point to nearest cluster although a constraint is broken
+                print('point force assigned')
                 clusters[indices[point][0]].append(int(point))
                 labels.append(int(indices[point][0]))
 
-
             #need way to handle points that were not assigned, when labels are returned
             print(str(truePoint) +' point not assigned')
-            forceAssign()
-
+            #forceAssign()
             #assign a space as a placeholder for cluster
-            #labels += ' '
+            labels += ' '
+
     labels=_restoreList(seed,labels)
+    distsToClusters = []
+    dist, constraints = _unshuffle(seed,dist,constraints)
+    for idx,lab in enumerate(labels):
+        if type(lab) == int:
+            distsToClusters.append(dist[idx][lab])
+        else:
+            distsToClusters.append(' ')
+    print('After assignment phase, assignments are {} and distances are {}'.format(labels,distsToClusters))
+
+
+
+    #this code is too complicated to read 
+    '''
     assigned_distances = [(idx,val) for idx,val in enumerate(labels) if type(val) == int]
     dist_idx = [x[0] for x in assigned_distances] # indexes of assigned points 
     dist_val = [x[1] for x in assigned_distances] # cluster number of assigned point
-    
     labelsofassigned = [n for n in labels if type(n) ==int]
+    print('la', labelsofassigned)
+
+    for lidx,lab in enumerate(labels):
+        if type(lab) == int:
+            values.append(dist
+
+
     
     
     values = []
     for i,idx in enumerate(dist_idx):
         values.append(dist[idx][dist_val[i]])
-    print('labels',labelsofassigned,'vals',values)
+    print('vals',values)
+    '''
 
-    return labelsofassigned, values
+    return labels, distsToClusters 
 
 def _shuffle(seed, inarray, constraints):
     random.seed(seed)
@@ -363,7 +382,7 @@ def _unshuffle(seed, shufarray, shufconstraints):
     for old, new in mapping.items():
         shufconstraints[oldcon==new]=old
 
-    return originalArray, originalConstraints
+    return originalArray, shufconstraints
 
 def _restoreList(seed,labels):
     random.seed(seed)
@@ -586,15 +605,13 @@ def cop_pairwise_distances_argmin_min(X, Y,constraints=[], axis=1, metric="eucli
     if axis == 0:
         X, Y = Y, X
 
-    
-    #TODO THIS LINE IS WHERE LABELS ARE ASSIGNED. 
-    #     NEED TO MODIFY TO ALLOW CONSTRAINTS AS WELL AS PASS CONSTRAINTS INTO IT
-    indices, values = zip(*cop_pairwise_distances_chunked(
+    lst=list(cop_pairwise_distances_chunked(
         X, Y, reduce_func=_cop_argmin_min_reduce, metric=metric,constraints=constraints,
         **metric_kwargs))
-    indices = np.concatenate(indices)
-    values = np.concatenate(values)
-
+    indices = lst[0][0]
+    values = lst [0][1]
+    print('orig distances',values)
+    
     return indices, values
 
 def pairwise_distances_argmin(X, Y, axis=1, metric="euclidean",
