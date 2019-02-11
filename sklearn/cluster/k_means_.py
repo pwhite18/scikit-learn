@@ -620,12 +620,9 @@ def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
         sample_weight = So
         centers_old = centers.copy()
         # labels assignment is also called the E-step of EM
-        #NOTE This method call re-assigns in-place 'distances' within 
-        #     the only place distancs seems to be used following this is in the
-        #     issparse method 
+
         #NOTE This method calculates inertia with only the assigned labels.
         #     This call also returns labels in the form [' ', 2, 1, 0]
-        print('distbug3', distances)
         labels, inertia = \
             _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,
                             precompute_distances=precompute_distances,
@@ -634,8 +631,6 @@ def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
         unassigned = [idx for idx,val in enumerate(labels) if type(val) is not int]
 
         print('unassigned',unassigned)
-        #TODO Need to modify X, sample weight, labels, and distances in order to account for the unassigned points here.
-        print('Before modification, X is {}, sample_weight is {}, labels are {}, distances is {}'.format(X,sample_weight,labels,distances))
 
         if unassigned:
             for k in sorted(unassigned, reverse=True): # Have to remove elemetns without the use of numpy since it cannot handle mixed types
@@ -645,7 +640,6 @@ def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
             distances = np.delete(distances, (unassigned))
 
         labels = np.asarray(labels)
-        print('After modification, X is {}, sample_weight is {}, labels are {}, distances is {}'.format(X,sample_weight,labels,distances))
         # cython k-means code assumes int32 inputs
         labels = labels.astype(np.int32)
 
