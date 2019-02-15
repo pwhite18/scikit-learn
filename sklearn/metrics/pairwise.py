@@ -283,32 +283,33 @@ def _cop_argmin_min_reduce(dist, start, constraints):
         def assign_point():
             for cluster_idx in indices[point]:
                 if not clusters[cluster_idx]: # if cluster is empty, constraints do not matter
-                    print('constraint not violated')
+                    #print('constraint not violated')
                     clusters[cluster_idx].append(int(point))
                     labels.append(int(cluster_idx))
                     return True
                 else:
                     if not _violate_constraints(point, clusters[cluster_idx], constraints): # checks if assignment will violate constraint
-                        print('constraint not violated')
+                        #print('constraint not violated')
                         clusters[cluster_idx].append(int(point))
                         labels.append(int(cluster_idx))
                         return True
             return False
         assigned = assign_point()
+        #force assign method that will forcefully assignt point. This method is no longer used due to the algorithm handling
+        #unassigned points
         if not assigned:
             truePoint = _restorePoint(seed,point,dist.shape[0])
             notlabeled.append(truePoint)
             def forceAssign():
                 #method to assign point to nearest cluster although a constraint is broken
-                print('point force assigned')
+                #print('point force assigned')
                 clusters[indices[point][0]].append(int(point))
                 labels.append(int(indices[point][0]))
 
-            #need way to handle points that were not assigned, when labels are returned
-            print(str(truePoint) +' point not assigned')
-            #forceAssign()
+            #print(str(truePoint) +' point not assigned')
+            forceAssign()
             #assign a space as a placeholder for cluster
-            labels += ' '
+            #labels += ' '
 
     labels=_restoreList(seed,labels)
     distsToClusters = []
@@ -318,7 +319,6 @@ def _cop_argmin_min_reduce(dist, start, constraints):
             distsToClusters.append(dist[idx][lab])
         else:
             distsToClusters.append(' ')
-    print('After assignment phase, assignments are {} and distances are {}'.format(labels,distsToClusters))
 
 
 
@@ -416,7 +416,7 @@ def _violate_constraints(point, clusterPoints, constraints):
                 if point in dlpair:
                     dlpoint = dlpair[1-dlpair.index(point)] # get the point in the dl pair that should not be clustered with
                     if dlpoint in clusterPoints:
-                        print('Cl constraint violated')
+                        #print('Cl constraint violated')
                         return True
             return False
     return(dontLinkViolated())
@@ -610,7 +610,6 @@ def cop_pairwise_distances_argmin_min(X, Y,constraints=[], axis=1, metric="eucli
         **metric_kwargs))
     indices = lst[0][0]
     values = lst [0][1]
-    print('orig distances',values)
     
     return indices, values
 
