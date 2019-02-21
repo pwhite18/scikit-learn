@@ -265,8 +265,7 @@ def _argmin_min_reduce(dist, start):
     values = dist[np.arange(dist.shape[0]), indices]
     return indices, values
 
-#TODO need to handle unassigned points in terms of labels
-def _cop_argmin_min_reduce(dist, start, constraints):
+def _cop_argmin_min_reduce(dist, start, constraints, force_add):
     constraints=np.asarray(constraints)
     #constraints should be in the form
     # constraints['dl'] = [[0,1],[0,3]]
@@ -307,9 +306,11 @@ def _cop_argmin_min_reduce(dist, start, constraints):
                 labels.append(int(indices[point][0]))
 
             #print(str(truePoint) +' point not assigned')
-            forceAssign()
+            if force_add:
+                forceAssign()
             #assign a space as a placeholder for cluster
-            #labels += ' '
+            else:
+                labels += ' '
 
     labels=_restoreList(seed,labels)
     distsToClusters = []
@@ -319,29 +320,6 @@ def _cop_argmin_min_reduce(dist, start, constraints):
             distsToClusters.append(dist[idx][lab])
         else:
             distsToClusters.append(' ')
-
-
-
-    #this code is too complicated to read 
-    '''
-    assigned_distances = [(idx,val) for idx,val in enumerate(labels) if type(val) == int]
-    dist_idx = [x[0] for x in assigned_distances] # indexes of assigned points 
-    dist_val = [x[1] for x in assigned_distances] # cluster number of assigned point
-    labelsofassigned = [n for n in labels if type(n) ==int]
-    print('la', labelsofassigned)
-
-    for lidx,lab in enumerate(labels):
-        if type(lab) == int:
-            values.append(dist
-
-
-    
-    
-    values = []
-    for i,idx in enumerate(dist_idx):
-        values.append(dist[idx][dist_val[i]])
-    print('vals',values)
-    '''
 
     return labels, distsToClusters 
 
@@ -519,7 +497,7 @@ def pairwise_distances_argmin_min(X, Y, axis=1, metric="euclidean",
     return indices, values
 
 def cop_pairwise_distances_argmin_min(X, Y,constraints=[], axis=1, metric="euclidean",
-                                  batch_size=None, metric_kwargs=None):
+                                  batch_size=None, metric_kwargs=None, force_add=True):
     """Compute minimum distances between one point and a set of points.
 
     This function computes for each row in X, the index of the row of Y which
@@ -606,7 +584,7 @@ def cop_pairwise_distances_argmin_min(X, Y,constraints=[], axis=1, metric="eucli
         X, Y = Y, X
 
     lst=list(cop_pairwise_distances_chunked(
-        X, Y, reduce_func=_cop_argmin_min_reduce, metric=metric,constraints=constraints,
+        X, Y, reduce_func=_cop_argmin_min_reduce, metric=metric,constraints=constraints,force_add=force_add,
         **metric_kwargs))
     indices = lst[0][0]
     values = lst [0][1]
@@ -1559,7 +1537,7 @@ def pairwise_distances_chunked(X, Y=None, reduce_func=None,
 
 def cop_pairwise_distances_chunked(X, Y=None, reduce_func=None,
                                metric='euclidean', n_jobs=None,
-                               working_memory=None,constraints=None, **kwds):
+                               working_memory=None,constraints=None,force_add=True, **kwds):
     """Generate a distance matrix chunk by chunk with optional reduction
 
     In cases where not all of a pairwise distance matrix needs to be stored at
@@ -1619,7 +1597,7 @@ def cop_pairwise_distances_chunked(X, Y=None, reduce_func=None,
         #the reduce func called here is what actually does the labeling and min distance calculations
         if reduce_func is not None:
             chunk_size = D_chunk.shape[0]
-            D_chunk = reduce_func(D_chunk, sl.start,constraints)
+            D_chunk = reduce_func(D_chunk, sl.start,constraints,force_add)
             #_check_chunk_size(D_chunk, chunk_size)
 
         yield D_chunk

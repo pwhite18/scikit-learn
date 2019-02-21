@@ -183,7 +183,7 @@ def _check_sample_weight(X, sample_weight):
 def k_means(X, n_clusters, sample_weight=None, init='k-means++',
             precompute_distances='auto', n_init=10, max_iter=300,
             verbose=False, tol=1e-4, random_state=None, copy_x=True,
-            n_jobs=None, algorithm="cop", return_n_iter=False, constraints=None):
+            n_jobs=None, algorithm="cop", return_n_iter=False, constraints=None, force_add=True):
 
     """K-means clustering algorithm.
 
@@ -373,9 +373,9 @@ def k_means(X, n_clusters, sample_weight=None, init='k-means++',
         #NOTE this method saves off every result into ram. Which effectively uses more ram.
         # parallelisation of k-means runs
         seeds = random_state.randint(np.iinfo(np.int32).max, size=n_init)
-        results = Parallel(n_jobs=n_jobs, verbose=0)(
+        results = Parallel(n_jobs=n_jobs, verbose=1)(
             delayed(kmeans_single)(X, sample_weight, n_clusters,
-                                   constraints,
+                                   constraints,force_add,
                                    max_iter=max_iter, init=init,
                                    verbose=verbose, tol=tol,
                                    precompute_distances=precompute_distances,
@@ -420,7 +420,7 @@ def k_means(X, n_clusters, sample_weight=None, init='k-means++',
         for it in range(n_init):
             # run a k-means once
             labels, inertia, centers, n_iter_, unassigned = kmeans_single(
-                X, sample_weight, n_clusters, constraints, max_iter=max_iter, init=init,
+                X, sample_weight, n_clusters, constraints,force_add, max_iter=max_iter, init=init,
                 verbose=verbose, precompute_distances=precompute_distances,
                 tol=tol, x_squared_norms=x_squared_norms,
                 random_state=random_state)
@@ -456,7 +456,7 @@ def k_means(X, n_clusters, sample_weight=None, init='k-means++',
         return best_centers, best_labels, best_inertia, best_unassigned
 
 
-def _kmeans_single_elkan(X, sample_weight, n_clusters, constraints, max_iter=300,
+def _kmeans_single_elkan(X, sample_weight, n_clusters, constraints,force_add, max_iter=300,
                          init='k-means++', verbose=False, x_squared_norms=None,
                          random_state=None, tol=1e-4,
                          precompute_distances=True):
@@ -485,7 +485,7 @@ def _kmeans_single_elkan(X, sample_weight, n_clusters, constraints, max_iter=300
     return labels, inertia, centers, n_iter, None
 
 
-def _kmeans_single_lloyd(X, sample_weight, n_clusters,constraints, max_iter=300,
+def _kmeans_single_lloyd(X, sample_weight, n_clusters,constraints,force_add, max_iter=300,
                          init='k-means++', verbose=False, x_squared_norms=None,
                          random_state=None, tol=1e-4,
                          precompute_distances=True):
@@ -614,13 +614,10 @@ def _kmeans_single_lloyd(X, sample_weight, n_clusters,constraints, max_iter=300,
     return best_labels, best_inertia, best_centers, i + 1, None
 
 #lloyd algorithm applied with constraints
-def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
+def _kmeans_single_cop(X, sample_weight, n_clusters, constraints,force_add, max_iter=300,
                          init='k-means++', verbose=False , x_squared_norms=None,
                          random_state=None, tol=1e-4,
                          precompute_distances=True):
-
-    #TODO normalize inertia calculations across algorithms for fair comparison of variance of points
-    #TODO more rigorus testing, like the case when no points get assinged.
 
     random_state = check_random_state(random_state)
 
@@ -650,7 +647,7 @@ def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
         #NOTE This method calculates inertia with only the assigned labels.
         #     This call also returns labels in the form [' ', 2, 1, 0]
         labels, inertia = \
-            _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,
+            _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,force_add,
                             precompute_distances=precompute_distances,
                             distances=distances)
         # Get unassigned points
@@ -668,6 +665,7 @@ def _kmeans_single_cop(X, sample_weight, n_clusters, constraints, max_iter=300,
         labels = labels.astype(np.int32)
 
         # computation of the means is also called the M-step of EM
+
         if sp.issparse(X):
             centers = _k_means._centers_sparse(X, sample_weight, labels,
                                                n_clusters, distances)
@@ -753,7 +751,7 @@ def _labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
     return labels, inertia
 
 def _cop_labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
-                                     centers, distances, constraints):
+                                     centers, distances, constraints,force_add):
     """Compute labels and inertia using a full distance matrix.
     This will overwrite the 'distances' array in-place.
     Parameters
@@ -784,7 +782,7 @@ def _cop_labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
     #NOTE This cop method now returns lists of mixed types due to the possibility
     #     of points that do not get assigned. Mixed ints and strings of ' ' 
     labels, mindist = cop_pairwise_distances_argmin_min(
-        X=X, Y=centers, constraints=constraints, metric='euclidean', metric_kwargs={'squared': True})
+        X=X, Y=centers, constraints=constraints, force_add = force_add,metric='euclidean', metric_kwargs={'squared': True})
 
     distances = mindist
     onlylabeled = np.asarray([val for val in mindist if type(val)==np.float64])
@@ -849,9 +847,10 @@ def _labels_inertia(X, sample_weight, x_squared_norms, centers,
         inertia = _k_means._assign_labels_array(
             X, sample_weight, x_squared_norms, centers, labels,
             distances=distances)
+    inertia = np.mean(inertia) # Modified inertia calulation for equal comparison of algorithms
     return labels, inertia
 
-def _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,
+def _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,force_add,
                     precompute_distances=True, distances=None):
     """E step of the K-means EM algorithm.
     Compute the labels and the inertia of the given samples and centers.
@@ -888,7 +887,7 @@ def _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,
         distances = np.zeros(shape=(0,), dtype=X.dtype)
     return _cop_labels_inertia_precompute_dense(X, sample_weight,
                                                     x_squared_norms, centers,
-                                                    distances, constraints)
+                                                    distances, constraints, force_add)
 
 def _init_centroids(X, k, init, random_state=None, x_squared_norms=None,
                     init_size=None):
@@ -1100,7 +1099,7 @@ class KMeans(BaseEstimator, ClusterMixin, TransformerMixin):
     def __init__(self, n_clusters=8, init='k-means++', n_init=10,
                  max_iter=300, tol=1e-4, precompute_distances='auto',
                  verbose=0, random_state=None, copy_x=True,
-                 n_jobs=None, algorithm='cop', constraints=None):
+                 n_jobs=None, algorithm='cop', constraints=None, force_add=True):
 
         self.n_clusters = n_clusters
         self.init = init
@@ -1115,6 +1114,7 @@ class KMeans(BaseEstimator, ClusterMixin, TransformerMixin):
         self.algorithm = algorithm
         #Custom variabels
         self.constraints = constraints
+        self.force_add = force_add
 
 
     def _check_test_data(self, X):
@@ -1167,7 +1167,7 @@ class KMeans(BaseEstimator, ClusterMixin, TransformerMixin):
                 precompute_distances=self.precompute_distances,
                 tol=self.tol, random_state=random_state, copy_x=self.copy_x,
                 n_jobs=self.n_jobs, algorithm=self.algorithm,
-                return_n_iter=True, constraints=self.constraints)
+                return_n_iter=True, constraints=self.constraints,force_add=self.force_add)
         return self
 
     def fit_predict(self, X, y=None, sample_weight=None):
@@ -1277,7 +1277,7 @@ class KMeans(BaseEstimator, ClusterMixin, TransformerMixin):
         return _labels_inertia(X, sample_weight, x_squared_norms,
                                self.cluster_centers_)[0]
 
-    def cop_predict(self, X, iteration, sample_weight=None):
+    def cop_predict(self, X, iteration, constraints=None,force_add=True, sample_weight=None):
         """Predict the closest cluster each sample in X belongs to.
 
         In the vector quantization literature, `cluster_centers_` is called
@@ -1303,8 +1303,13 @@ class KMeans(BaseEstimator, ClusterMixin, TransformerMixin):
 
         X = self._cop_check_test_data(X, iteration)
         x_squared_norms = row_norms(X, squared=True)
-        return _labels_inertia(X, sample_weight, x_squared_norms,
-                               self.cluster_centers_[iteration])[0]
+
+        if constraints is None:
+            return _labels_inertia(X, sample_weight, x_squared_norms,
+                                   self.cluster_centers_[iteration])[0]
+        else: 
+            return _cop_labels_inertia(X, sample_weight, x_squared_norms,
+                                   self.cluster_centers_[iteration],constraints,force_add)[0]
 
     def score(self, X, y=None, sample_weight=None):
         """Opposite of the value of X on the K-means objective.
