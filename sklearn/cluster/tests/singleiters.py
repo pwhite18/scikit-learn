@@ -26,7 +26,7 @@ ch.setFormatter(fmt)
 ch.setLevel(logging.DEBUG if dbg else logging.INFO)
 logger.addHandler(ch)
 
-n_runs = 20 
+n_runs = 1 
 max_iter = 50
 
 
@@ -91,12 +91,11 @@ class MonteCarlo(Experiment):
 
     def __init__(self, config, dbg):
         super(MonteCarlo, self).__init__('MonteCarlo', config, dbg)
-        
         with open('param_config.yml','r') as stream:
             self.param_dict = (yaml.load(stream))
 
 
-    def run(self, trials, errors):
+    def run(self, trials, errors,runnum):
         numWritesToFile=0
         ktorun=[3,4,5,6,7,8]
         for kclusters in ktorun:
@@ -139,7 +138,7 @@ class MonteCarlo(Experiment):
                             if (train_hops.shape[0] < kclusters) or (test_hops.shape[0] <kclusters):
                                 break
 
-                            sweepMax = 10
+                            sweepMax = int(kclusters+kclusters/2.0)
                             if (train_hops.shape[0] <= sweepMax) or (test_hops.shape[0] <=sweepMax):
                                 break
 
@@ -199,7 +198,7 @@ class MonteCarlo(Experiment):
                             coplorun=0
 
                             def execSpectral():
-                                spectral=SpectralClustering(n_jobs=-1,n_clusters=kclusters,n_init=n_runs,random_state=0).fit(train_hops)
+                                spectral=SpectralClustering(n_jobs=-1,n_clusters=kclusters,n_init=n_runs,).fit(train_hops)
                                 return spectral
                             #spectral = execSpectral()
                             #spectral.labels_=spectral.labels_[0]
@@ -218,36 +217,33 @@ class MonteCarlo(Experiment):
                             # Conventional K-means algorithm used as a baseline comparison 
                             def execKmeans():
                                 start = time.time()
-                                kmeans = KMeans(algorithm='full',n_clusters=kclusters,random_state=0, verbose=False, constraints=train_cl, n_init=n_runs, n_jobs=-1, max_iter=max_iter).fit(train_hops)
+                                kmeans = KMeans(algorithm='full',n_clusters=kclusters, verbose=False, constraints=train_cl, n_init=n_runs, n_jobs=-1, max_iter=max_iter).fit(train_hops)
                                 end = time.time()
                                 kmrun=end-start
                                 logger.debug('It took {} to run {} kmeans iterations'.format(end-start, n_runs))
                                 return kmeans
                             kmeans = execKmeans()
 
-                            kSweepMin = 1
-                            sweepMax=10
+                            """    
+                            kSweepMin = int(kclusters-kclusters/2.0)
                             silCo=[]
                             for numK in range(kSweepMin,sweepMax):
                                 def runtk():
-                                    tempkmeans = KMeans(algorithm='full', n_clusters=numK,  verbose=False, constraints=train_cl, n_init=n_runs, n_jobs=-1, max_iter=max_iter).fit(train_hops)
+                                    tempkmeans = KMeans(algorithm='full', n_clusters=numK, random_state=0, verbose=False, constraints=train_cl, n_init=n_runs, n_jobs=-1, max_iter=max_iter).fit(train_hops)
                                     return tempkmeans
                                 tempkmeans=runtk()
                                 if max(tempkmeans.labels_) ==0:
                                     continue
                                 templabels = tempkmeans.labels_
-                                if len(tempkmeans.labels_)<numK:
-                                    continue
                                 silCo.append(getSilhouetteCoeff(train_hops,templabels))
-                            print("silcos {}",format(silCo))
                             kmGuessK=(np.argmax(silCo)+kSweepMin)
-
-                            logger.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!! KM guessed {} K as {} which is: {}  !!!!!!!!!!!!!!!!!!!!!!!!!".format(kclusters,kmGuessK,kmGuessK==kclusters))
+                            """
+                            kmGuessK=0
                             
                             #Run cop algorithm and return list of results in terms of minimum inertia
                             def execCopForce():
                                 start = time.time()
-                                copkmeans = KMeans(algorithm='cop',n_clusters=kclusters, random_state=0,  verbose=False, constraints=train_cl, n_init=n_runs, n_jobs = -1, max_iter=max_iter, force_add=True).fit(train_hops)
+                                copkmeans = KMeans(algorithm='cop',n_clusters=kclusters, verbose=False, constraints=train_cl, n_init=n_runs, n_jobs = -1, max_iter=max_iter, force_add=True).fit(train_hops)
                                 end = time.time()
                                 coprun=end-start
                                 logger.debug('It took {} to run {} cop iterations'.format(end-start, n_runs))
@@ -258,18 +254,20 @@ class MonteCarlo(Experiment):
                             def execCoplo():
                                 start = time.time()
                                 print("CLUSTERING WITH {} CONSTRAINTS".format(len(train_cl)))
-                                copleftout = KMeans(algorithm='cop', n_clusters=kclusters, random_state=0, verbose=False, constraints=train_cl,force_add=False, n_init=n_runs, n_jobs=-1, max_iter=max_iter ).fit(train_hops)
+                                copleftout = KMeans(algorithm='cop', n_clusters=kclusters, verbose=False, constraints=train_cl,force_add=False, n_init=n_runs, n_jobs=-1, max_iter=max_iter ).fit(train_hops)
                                 end=time.time()
                                 coplorun=end-start
                                 logger.debug('It took {} to run {} cop left out iterations'.format(end-start, n_runs))
                                 return copleftout
 
-                            #copleftout = execCoplo()
-                            """
+                            copleftout = execCoplo()
 
+                            """
                             silCo=[]
                             silCoPenalty=[]
                             for numK in range(mink,sweepMax):
+                                logger.debug("------------------------see this ---------------")
+                                logger.debug("cop Guess k bug")
                                 temptrainhops=np.copy(train_hops)
                                 def runcop():
 
@@ -297,7 +295,7 @@ class MonteCarlo(Experiment):
                                     silCoPenalty.append(sil*1.0/float(numK-mink))
                             copGuessK=(np.argmax(silCo)+mink)
                             copGuessKPenalty=(np.argmax(silCoPenalty)+mink)
-                            
+                            """
 
                             copGuessK=0
                             copGuessKPenalty=0
@@ -320,15 +318,13 @@ class MonteCarlo(Experiment):
                             coplo_pointunassigned_unassigned = points_unassigned[min_cop_unassigned] #Need to add these to csv
                             coplo_pointunassigned_inertia = points_unassigned[min_cop_inertia]
 
-                            """
-
                             #Held out set labels
                             km_labels_test= kmeans.predict(test_hops)
                             #cop_labels_test_constraints = copkmeans.cop_predict(test_hops,0,test_cl,True) # assign the test hops with constraints
                             #cop_labels_test = copkmeans.cop_predict(test_hops,0)# assign the test hops without constraints
 
-                            #coplo_labels_inertia_constraints = copleftout.cop_predict(test_hops,min_cop_inertia,test_cl,True) #prediction of best inertia run with force constraints
-                            #coplo_labels_unassigned_constraints = copleftout.cop_predict(test_hops,min_cop_unassigned,test_cl,True) #prediction of best unassigned run with force constraints
+                            coplo_labels_inertia_constraints = copleftout.cop_predict(test_hops,min_cop_inertia,test_cl,True) #prediction of best inertia run with force constraints
+                            coplo_labels_unassigned_constraints = copleftout.cop_predict(test_hops,min_cop_unassigned,test_cl,True) #prediction of best unassigned run with force constraints
                     
                             logger.info("true labels {}, predicted labels {}".format(train_keys, kmeans.labels_))
 
@@ -341,11 +337,11 @@ class MonteCarlo(Experiment):
                             km_train_accuracy=getClusterAccuracy(train_keys,reassignClusterLabels(train_keys,kmeans.labels_))
                             #cop_train_score = doMutualInformation(copkmeans.labels_[0], train_keys)
 
-                            #copiner_train_score = doMutualInformation(coplo_labels_inertia, np.delete(train_keys,copleftout.unassigned_[min_cop_inertia]))
-                            #copiner_accuracy=getClusterAccuracy(np.delete(train_keys,copleftout.unassigned_[min_cop_inertia]),reassignClusterLabels(np.delete(train_keys,copleftout.unassigned_[min_cop_inertia]),coplo_labels_inertia))
+                            copiner_train_score = doMutualInformation(coplo_labels_inertia, np.delete(train_keys,copleftout.unassigned_[min_cop_inertia]))
+                            copiner_accuracy=getClusterAccuracy(np.delete(train_keys,copleftout.unassigned_[min_cop_inertia]),reassignClusterLabels(np.delete(train_keys,copleftout.unassigned_[min_cop_inertia]),coplo_labels_inertia))
 
-                            #copass_train_score = doMutualInformation(coplo_labels_unassigned, np.delete(train_keys,copleftout.unassigned_[min_cop_unassigned]))
-                            #copass_accuracy=getClusterAccuracy(np.delete(train_keys,copleftout.unassigned_[min_cop_unassigned]),reassignClusterLabels(np.delete(train_keys,copleftout.unassigned_[min_cop_unassigned]),coplo_labels_unassigned))
+                            copass_train_score = doMutualInformation(coplo_labels_unassigned, np.delete(train_keys,copleftout.unassigned_[min_cop_unassigned]))
+                            copass_accuracy=getClusterAccuracy(np.delete(train_keys,copleftout.unassigned_[min_cop_unassigned]),reassignClusterLabels(np.delete(train_keys,copleftout.unassigned_[min_cop_unassigned]),coplo_labels_unassigned))
 
 
                             # ------------------------------- Test Score ---------------------------------------------
@@ -353,11 +349,11 @@ class MonteCarlo(Experiment):
                             km_test_accuracy=getClusterAccuracy(test_keys,reassignClusterLabels(test_keys,km_labels_test))
                             #cop_test_score_cons = doMutualInformation(cop_labels_test_constraints, test_keys)
 
-                            #copiner_test_score_cons = doMutualInformation(coplo_labels_inertia_constraints, test_keys)
-                            #copiner_test_accuracy=getClusterAccuracy(test_keys,reassignClusterLabels(test_keys,coplo_labels_inertia_constraints))
+                            copiner_test_score_cons = doMutualInformation(coplo_labels_inertia_constraints, test_keys)
+                            copiner_test_accuracy=getClusterAccuracy(test_keys,reassignClusterLabels(test_keys,coplo_labels_inertia_constraints))
 
-                            #copass_test_score_cons = doMutualInformation(coplo_labels_unassigned_constraints, test_keys)
-                            #copass_test_accuracy=getClusterAccuracy(test_keys,reassignClusterLabels(test_keys,coplo_labels_unassigned_constraints))
+                            copass_test_score_cons = doMutualInformation(coplo_labels_unassigned_constraints, test_keys)
+                            copass_test_accuracy=getClusterAccuracy(test_keys,reassignClusterLabels(test_keys,coplo_labels_unassigned_constraints))
 
                             # ------------------------------- Collision Accuracy ---------------------------------------------
                             #km_train_collision_accuracy=getCollisionAccuracy(train_keys,reassignClusterLabels(train_keys,kmeans.labels_),train_collisions)
@@ -365,39 +361,39 @@ class MonteCarlo(Experiment):
 
 
                             #copiner_train_collision_accuracy=getCollisionAccuracy(np.delete(train_keys,copleftout.unassigned_[min_cop_inertia]),reassignClusterLabels(np.delete(train_keys,copleftout.unassigned_[min_cop_inertia]),coplo_labels_inertia),train_collisions)
-                            #copiner_test_collision_accuracy=getCollisionAccuracy(test_keys,reassignClusterLabels(test_keys,coplo_labels_inertia_constraints),test_collisions)
+                            copiner_test_collision_accuracy=getCollisionAccuracy(test_keys,reassignClusterLabels(test_keys,coplo_labels_inertia_constraints),test_collisions)
 
                             #copass_train_collision_accuracy=getCollisionAccuracy(np.delete(train_keys,copleftout.unassigned_[min_cop_unassigned]),reassignClusterLabels(np.delete(train_keys,copleftout.unassigned_[min_cop_unassigned]),coplo_labels_unassigned),train_collisions)
-                            #copass_test_collision_accuracy=getCollisionAccuracy(test_keys,reassignClusterLabels(test_keys,coplo_labels_unassigned_constraints),test_collisions)
+                            copass_test_collision_accuracy=getCollisionAccuracy(test_keys,reassignClusterLabels(test_keys,coplo_labels_unassigned_constraints),test_collisions)
 
-                            #logger.info("km, copiner, copunass accuracies, {}, {}, {}".format(km_train_accuracy, copiner_accuracy,copass_accuracy))
+                            logger.info("km, copiner, copunass accuracies, {}, {}, {}".format(km_train_accuracy, copiner_accuracy,copass_accuracy))
 
 
                             
                             logger.info('On Trial {} Error {} and cluster {}'.format(t,e,kclusters))
 
                             result = {'Trial': t, 'Error': e,'PercentDroppped':ConstraintsDropped , 'Heldout':heldout,\
-                                    'Hops': hops.shape[0],'k': kclusters,#'copNumUnassignedUnassigned':coplo_pointunassigned_unassigned,\
-                                                #'copNumUnassignedInertia': coplo_pointunassigned_inertia,\
+                                    'Hops': hops.shape[0],'k': kclusters,'copNumUnassignedUnassigned':coplo_pointunassigned_unassigned,\
+                                                'copNumUnassignedInertia': coplo_pointunassigned_inertia,\
                                                 'kmTrainScore':km_train_score,'kmInertia':[kmeans.inertia_],'kmIter':[kmeans.n_iter_],'kmTestScore':km_test_score,\
                                                 #'copInertia':copkmeans.inertia_,'copIter':copkmeans.n_iter_,'copRuntime': coprun,\
                                                 #'copTestScoreCons':cop_test_score_cons,\
-                                                #'copInerScore':copiner_train_score,'copInerInertia':coplo_inertia_inertia,'copInerIter':coplo_iter_inertia,\
-                                                #'copInerTestScoreCons':copiner_test_score_cons,\
-                                                #'copUnassScore':copass_train_score,'copUnassInertia':coplo_inertia_unassigned,'copUnassIter':coplo_iter_unassigned,\
-                                                #'copUnassTestScoreCons':copass_test_score_cons,\
+                                                'copInerScore':copiner_train_score,'copInerInertia':coplo_inertia_inertia,'copInerIter':coplo_iter_inertia,\
+                                                'copInerTestScoreCons':copiner_test_score_cons,\
+                                                'copUnassScore':copass_train_score,'copUnassInertia':coplo_inertia_unassigned,'copUnassIter':coplo_iter_unassigned,\
+                                                'copUnassTestScoreCons':copass_test_score_cons,\
                                                 'kmRuntime': kmrun, 'coploRuntime':coplorun, 'traincl': len(train_cl),'testcl': len(test_cl),\
-                                                'kmTrainAccuracy': km_train_accuracy,# 'copinerTrainAccuracy': copiner_accuracy, 'copassTrainAccuracy': copass_accuracy,\
-                                                'kmTestAccuracy':km_test_accuracy, #'copinerTestAccuracy':copiner_test_accuracy, 'copassTestAccuracy': copass_test_accuracy,\
+                                                'kmTrainAccuracy': km_train_accuracy, 'copinerTrainAccuracy': copiner_accuracy, 'copassTrainAccuracy': copass_accuracy,\
+                                                'kmTestAccuracy':km_test_accuracy, 'copinerTestAccuracy':copiner_test_accuracy, 'copassTestAccuracy': copass_test_accuracy,\
                                                 'TrainCollisions':len(train_collisions),
                                                 #'kmTrainCollisionAccuracy':km_train_collision_accuracy,
                                                 'kmTestCollisionAccuracy':km_test_collision_accuracy,
                                                 #'copInerCollisionAccuracy':copiner_train_collision_accuracy, 
-                                                #'copInterTestCollisionAccuracy': copiner_test_collision_accuracy,
+                                                'copInterTestCollisionAccuracy': copiner_test_collision_accuracy,
                                                 #'copUnassCollisionAccuracy':copass_train_collision_accuracy, 
-                                                #'copUnassTestCollisionAccuracy': copass_test_collision_accuracy,
-                                                #'copGuessK': copGuessK,
-                                                #'copGuessKPenalty': copGuessKPenalty,
+                                                'copUnassTestCollisionAccuracy': copass_test_collision_accuracy,
+                                                'copGuessK': copGuessK,
+                                                'copGuessKPenalty': copGuessKPenalty,
                                                 'kmGuessK': kmGuessK,
                                                 'mink':mink,
                                                 #'spectralTrainScore':spectral_train_score,
@@ -411,11 +407,11 @@ class MonteCarlo(Experiment):
                             if numWritesToFile ==0:
                                 header = True
                             numWritesToFile +=1
-                            df.to_csv('ZeroTimeErroKmeans.csv',mode='a',header=header)
+                            df.to_csv('ZeroTimeErrorRandomIter'+str(runnum)+'.csv',mode='a',header=header)
 
 if __name__ == "__main__":
-    r = MonteCarlo(config = {"resultsSavePath": "results/"}, dbg= False)
-    r.run(range(0,100),range(0,40,5))
-    #r.run(range(15),range(0,40,5))
+    for runnum in range(20):
+        r = MonteCarlo(config = {"resultsSavePath": "results/"}, dbg= True)
+        r.run(range(0,100),range(0,40,5),runnum)
 
 

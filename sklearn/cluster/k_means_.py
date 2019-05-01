@@ -373,7 +373,7 @@ def k_means(X, n_clusters, sample_weight=None, init='k-means++',
         #NOTE this method saves off every result into ram. Which effectively uses more ram.
         # parallelisation of k-means runs
         seeds = random_state.randint(np.iinfo(np.int32).max, size=n_init)
-        results = Parallel(n_jobs=n_jobs, verbose=1)(
+        results = Parallel(n_jobs=n_jobs, verbose=verbose)(
             delayed(kmeans_single)(X, sample_weight, n_clusters,
                                    constraints,force_add,
                                    max_iter=max_iter, init=init,
@@ -747,7 +747,7 @@ def _labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
     if n_samples == distances.shape[0]:
         # distances will be changed in-place
         distances[:] = mindist
-    inertia = np.mean(mindist * sample_weight)
+    inertia = np.mean((mindist * sample_weight)**2)
     return labels, inertia
 
 def _cop_labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
@@ -787,7 +787,7 @@ def _cop_labels_inertia_precompute_dense(X, sample_weight, x_squared_norms,
     distances = mindist
     onlylabeled = np.asarray([val for val in mindist if type(val)==np.float64])
     #NOTE Sample weights were removed from this calculation 
-    inertia = np.mean(onlylabeled)
+    inertia = np.mean(onlylabeled**2)
     return labels, inertia
 
 def _labels_inertia(X, sample_weight, x_squared_norms, centers,
@@ -847,7 +847,7 @@ def _labels_inertia(X, sample_weight, x_squared_norms, centers,
         inertia = _k_means._assign_labels_array(
             X, sample_weight, x_squared_norms, centers, labels,
             distances=distances)
-    inertia = np.mean(inertia) # Modified inertia calulation for equal comparison of algorithms
+    inertia = np.mean(inertia**2) # Modified inertia calulation for equal comparison of algorithms
     return labels, inertia
 
 def _cop_labels_inertia(X, sample_weight, x_squared_norms, centers, constraints,force_add,
